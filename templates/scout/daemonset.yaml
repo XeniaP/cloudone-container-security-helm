@@ -1,4 +1,4 @@
-{{- if eq true .Values.cloudOne.runtimeSecurity.enabled }}
+{{- if or .Values.cloudOne.runtimeSecurity.enabled .Values.cloudOne.malwareScanning.enabled }}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -16,8 +16,11 @@ spec:
       labels:
       {{- include "scout.labels" .| nindent 8 }}
       annotations:
+{{- $hasApparmorProfile := semverCompare ">=1.30" (include "kubeVersion" .) -}}
+{{- if not $hasApparmorProfile }}
         container.apparmor.security.beta.kubernetes.io/falco: unconfined
         container.apparmor.security.beta.kubernetes.io/scout: unconfined
+{{- end }}{{/* if */}}
         checksum/config: {{ include (print $.Template.BasePath "/scout/configmap.yaml") . | sha256sum }}
 {{- if eq "tls" .Values.cloudOne.k8sMetaCollector.grpcAuth.type }}
         checksum/metacollector: {{ include (print $.Template.BasePath "/k8s-metacollector-secret.yaml") . | sha256sum }}
@@ -54,9 +57,11 @@ spec:
 {{- $securityContext := default .Values.securityContext.default .Values.securityContext.scout }}
 {{- $podSecurityContext := default .Values.securityContext.default.pod $securityContext.pod }}
 {{- $scoutSecurityContext := default .Values.securityContext.default.container $securityContext.scout }}
-{{- $falcoSecurityContext := default .Values.securityContext.default.container $securityContext.falco }}
+{{- $falcoSecurityContext := include "falco.securityContext" . | fromYaml }}
 {{- $downloaderSecurityContext := default .Values.securityContext.default.container $securityContext.downloader }}
 {{- $initSecurityContext := default .Values.securityContext.default.container $securityContext.init }}
+{{- $jobStatusMntPath := "/status-dir" }}
+
 {{- if $securityContextEnabled }}
       securityContext:
 {{ toYaml $podSecurityContext | indent 8 }}
@@ -74,30 +79,15 @@ spec:
 {{ toYaml (default .Values.resources.defaults .Values.resources.falco) | indent 12 }}
 {{- if $securityContextEnabled }}
           securityContext:
-{{ toYaml $falcoSecurityContext | indent 12 }}
+{{ include "falco.securityContext" . | indent 12 }}
+{{- if $hasApparmorProfile }}
+            appArmorProfile:
+              type: Unconfined
+{{- end }}{{/* if */}}
 {{- end }}{{/* if $securityContextEnabled */}}
           args:
             - /usr/bin/falco
-            {{- if .Values.scout.falco.cri.enabled }}
-            - --cri
-            - /run/cri/cri.sock
-            {{- end }}{{/* if */}}
-            {{- if .Values.scout.falco.dockershim.enabled }}
-            - --cri
-            - /run/dockershim.sock
-            {{- end }}{{/* if */}}
-            {{- if .Values.scout.falco.k0s.enabled }}
-            - --cri
-            - /run/k0s/containerd.sock
-            {{- end }}{{/* if */}}
-            {{- if .Values.scout.falco.k3s.enabled }}
-            - --cri
-            - /run/k3s/containerd/containerd.sock
-            {{- end }}{{/* if */}}
-            - -K
-            - /var/run/secrets/kubernetes.io/serviceaccount/token
-            - --k8s-node
-            - $(NODE_NAME)
+{{- include "containerRuntime.sock.falco.args" .Values.scout.falco | trim | nindent 12 }}
             - -p
             - >
               container.id=%container.id
@@ -127,6 +117,12 @@ spec:
               proc.ppid=%proc.ppid
               user.loginuid=%user.loginuid
               user.name=%user.name
+            - -o
+            - stdout_output.enabled={{ default "false" .Values.scout.falco.stdout_enabled }}
+            - -o
+            - syslog_output.enabled={{ default "false" .Values.scout.falco.syslog_enabled }}
+            - -o
+            - log_level={{ include "logLevel" (list .Values.scout.falco.logLevel .) }}
         {{- if .Values.scout.falco.extraArgs }}
 {{ toYaml .Values.scout.falco.extraArgs | indent 12 }}
         {{- end }}{{/* if */}}
@@ -144,26 +140,7 @@ spec:
                 fieldRef:
                   fieldPath: spec.nodeName
           volumeMounts:
-            {{- if .Values.scout.falco.docker.enabled }}
-            - mountPath: /host/var/run/docker.sock
-              name: docker-socket
-            {{- end}}{{/* if */}}
-            {{- if .Values.scout.falco.cri.enabled }}
-            - mountPath: /host/run/cri/cri.sock
-              name: cri-socket
-            {{- end}}{{/* if */}}
-            {{- if .Values.scout.falco.dockershim.enabled }}
-            - mountPath: /host/run/dockershim.sock
-              name: dockershim-socket
-            {{- end}}{{/* if */}}
-            {{- if .Values.scout.falco.k0s.enabled }}
-            - mountPath: /host/run/k0s/containerd.sock
-              name: k0s-socket
-            {{- end}}{{/* if */}}
-            {{- if .Values.scout.falco.k3s.enabled }}
-            - mountPath: /host/run/k3s/containerd/containerd.sock
-              name: k3s-socket
-            {{- end}}{{/* if */}}
+{{- include "containerRuntime.sock.volumeMounts" ( list "/host" .Values.scout.falco ) | trim | nindent 12 }}
             - mountPath: /host/dev
               name: dev-fs
               readOnly: true
@@ -180,6 +157,9 @@ spec:
               readOnly: true
             - mountPath: /host/etc
               name: etc-fs
+              readOnly: true
+            - mountPath: /sys/kernel/debug
+              name: debugfs
               readOnly: true
             - mountPath: /etc/falco
               name: config-volume
@@ -205,26 +185,17 @@ spec:
 {{ toYaml (default .Values.resources.defaults .Values.resources.falco) | indent 12 }}
 {{- if $securityContextEnabled }}
           securityContext:
-{{ toYaml $falcoSecurityContext | indent 12 }}
+{{ include "falco.securityContext" . | indent 12 }}
+{{- if $hasApparmorProfile }}
+            appArmorProfile:
+              type: Unconfined
+{{- end }}{{/* if */}}
 {{- end }}{{/* if $securityContextEnabled */}}
           args:
             - /usr/bin/falco
             - -c
             - /etc/falco/falco-customrules.yaml
-            {{- if .Values.scout.falco.cri.enabled }}
-            - --cri
-            - /run/cri/cri.sock
-            {{- end }}{{/* if */}}
-            {{- if .Values.scout.falco.dockershim.enabled }}
-            - --cri
-            - /run/dockershim.sock
-            {{- end }}{{/* if */}}
-            - -K
-            - /var/run/secrets/kubernetes.io/serviceaccount/token
-            - -k
-            - {{ default "https://$(KUBERNETES_SERVICE_HOST)" .Values.scout.falco.apiUrl }}
-            - --k8s-node
-            - $(NODE_NAME)
+{{- include "containerRuntime.sock.falco.args" .Values.scout.falco | trim | nindent 12 }}
             - -p
             - >
               container.id=%container.id
@@ -254,10 +225,16 @@ spec:
               proc.ppid=%proc.ppid
               user.loginuid=%user.loginuid
               user.name=%user.name
+            - -o
+            - stdout_output.enabled={{ default "false" .Values.scout.falco.stdout_enabled }}
+            - -o
+            - syslog_output.enabled={{ default "false" .Values.scout.falco.syslog_enabled }}
+            - -o
+            - log_level={{ include "logLevel" (list .Values.scout.falco.logLevel .) }}
         {{- if .Values.scout.falco.extraArgs }}
 {{ toYaml .Values.scout.falco.extraArgs | indent 12 }}
         {{- end }}{{/* if */}}
-          env:            
+          env:
             - name: SKIP_DRIVER_LOADER
               value: "true"
             - name: TZ
@@ -270,19 +247,20 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+          {{- if .Values.cloudOne.runtimeSecurity.customRules.output.splunk.hecTokenSecretName }}
+          {{- if not ( lookup "v1" "Secret" .Release.Namespace .Values.cloudOne.runtimeSecurity.customRules.output.splunk.hecTokenSecretName ) -}}{{- fail (
+              printf "secret %s is expected in namespace %s, with key 'hec_secret' containing Splunk HEC token"
+                .Values.cloudOne.runtimeSecurity.customRules.output.splunk.hecTokenSecretName
+                .Release.Namespace
+              ) -}}{{- end}}
+            - name: SPLUNK_HEC_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.cloudOne.runtimeSecurity.customRules.output.splunk.hecTokenSecretName }}
+                  key: hec_secret
+          {{- end }}
           volumeMounts:
-            {{- if .Values.scout.falco.docker.enabled }}
-            - mountPath: /host/var/run/docker.sock
-              name: docker-socket
-            {{- end}}{{/* if */}}
-            {{- if .Values.scout.falco.cri.enabled }}
-            - mountPath: /host/run/cri/cri.sock
-              name: cri-socket
-            {{- end}}{{/* if */}}
-            {{- if .Values.scout.falco.dockershim.enabled }}
-            - mountPath: /host/run/dockershim.sock
-              name: dockershim-socket
-            {{- end}}{{/* if */}}
+{{- include "containerRuntime.sock.volumeMounts" ( list "/host" .Values.scout.falco ) | trim | nindent 12 }}
             - mountPath: /host/dev
               name: dev-fs
               readOnly: true
@@ -300,6 +278,9 @@ spec:
             - mountPath: /host/etc
               name: etc-fs
               readOnly: true
+            - mountPath: /sys/kernel/debug
+              name: debugfs
+              readOnly: true
             - mountPath: /etc/falco
               name: config-volume
               readOnly: true
@@ -309,7 +290,7 @@ spec:
             - mountPath: /root/.falco
               name: components-dir
               readOnly: true
-{{- end }}{{/* if */}}
+{{- end }}{{/* if .Values.cloudOne.runtimeSecurity.customRules.enabled */}}
         - name: scout
           {{- $imageDefaults := .Values.images.defaults }}
           {{- with .Values.images.scout }}
@@ -320,9 +301,15 @@ spec:
           imagePullPolicy: {{ default (default "Always" $imageDefaults.pullPolicy) .pullPolicy }}
           {{- end }}{{/* with */}}
           args:
+            - --zap-devel={{ default "false" .Values.logConfig.devel }}
+            - --zap-log-level={{ include "logLevel" (list .Values.scout.scout.logLevel .) }}
+            - --zap-encoder={{ default "json" .Values.logConfig.encoder }}
+            - --zap-stacktrace-level={{ default "error" .Values.logConfig.stacktraceLevel }}
+            - --zap-time-encoding={{ default "rfc3339" .Values.logConfig.timeEncoding }}
             - --grpc-socket-path
             - unix:///var/run/scout/scout.sock
             - --cloud-one-endpoint={{ include "container.security.endpoint" . }}
+            - --exclude-kubernetes-service-host-from-proxy={{ default "false" .Values.proxy.excludeKubernetesServiceHost }}
             - --excluded-namespaces
             {{- $excludeNS := (default (list) .Values.cloudOne.exclusion.namespaces) }}
             {{- if .Values.scout.excludeSameNamespace }}
@@ -331,8 +318,6 @@ spec:
             - {{ $excludeNS | join "," | quote }}
             - --falco-event-max-diff
             - 90s
-            - --log-level
-            - debug
             {{- if ne (len .Values.scout.scout.falcoInternalEvent) 0 }}
             - --falco-internal-event
             - {{ join "," .Values.scout.scout.falcoInternalEvent }}
@@ -343,6 +328,23 @@ spec:
             - --k8s-metacollector-cert
             - /etc/scout/metacollector-ca-cert.pem
             {{- end}}
+{{- include "containerRuntime.sock.args" ( list "cri" "" .Values.scout.falco ) | trim | nindent 12 }}
+            - --malware-scanning={{ default "false" .Values.cloudOne.malwareScanning.enabled }}
+            - --runtime-security={{ default "false" .Values.cloudOne.runtimeSecurity.enabled }}
+            {{- if .Values.cloudOne.malwareScanning.enabled }}
+            - --malware-scanner-url
+            - {{ include "malwareScanner.svc.url" . }}:{{ .Values.cloudOne.malwareScanning.scanner.port }}
+            - --excluded-scan-path
+            {{- $excludedPaths := (default (list) .Values.cloudOne.malwareScanning.excludedPaths) }}
+            {{- $combinedListPath := .Values.malwareScanner.defaultExcludedPaths }}
+            {{- range $excludedPaths }}
+            {{- $combinedListPath = append $combinedListPath . }}
+            {{- end }}{{/* range */}}
+            - {{ $combinedListPath | join "," | quote }}
+            - --job-status-file-path={{ printf "%s%s%s" "../.." $jobStatusMntPath "/malware_scan_job_status.json" }}
+            - --scan-worker-count
+            - "{{ .Values.malwareScanner.scanWorkerCount }}"
+            {{- end }}{{/* if .Values.cloudOne.malwareScanning.enabled */}}
         {{- if .Values.scout.scout.extraArgs }}
 {{ toYaml .Values.scout.scout.extraArgs | indent 12 }}
         {{- end }}{{/* if */}}
@@ -352,6 +354,10 @@ spec:
             - name: "{{ $key }}"
               value: "{{ $value }}"
           {{- end }}{{/* range */}}
+          {{- if .Values.cloudOne.malwareScanning.enabled }}
+            - name: TM_AM_SCAN_TIMEOUT_SECS
+              value: "{{ .Values.cloudOne.malwareScanning.scanTimeoutSeconds }}"
+          {{- end }}{{/* if */}}
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -368,11 +374,17 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+
 {{- if $securityContextEnabled }}
           securityContext:
 {{ toYaml $scoutSecurityContext | indent 12 }}
+{{- if $hasApparmorProfile }}
+            appArmorProfile:
+              type: Unconfined
+{{- end }}{{/* if */}}
 {{- end }}{{/* if */}}
           volumeMounts:
+{{- include "containerRuntime.sock.volumeMounts" ( list "/host" .Values.scout.falco ) | trim | nindent 12 }}
             - mountPath: /var/run/scout/
               name: grpc-socket-dir
               readOnly: true
@@ -383,6 +395,11 @@ spec:
             - mountPath: /secrets
               name: api-key
               readOnly: true
+            - mountPath: /host
+              name: host-root
+              readOnly: true
+            - mountPath: {{ $jobStatusMntPath }}
+              name: status-dir
 {{- if eq "tls" .Values.cloudOne.k8sMetaCollector.grpcAuth.type }}
             - mountPath: /etc/scout/metacollector-ca-cert.pem
               name: metacollector-grpc-certs
@@ -416,7 +433,7 @@ spec:
           args:
             - /component.version
             - {{ .Values.scout.downloader.componentDir }}
-        {{- end }}{{/* if eq */}}
+        {{- end }}{{/* if eq .Values.scout.downloader.componentType "falco-ebpf-program" */}}
         - name: downloader
           {{- $imageDefaults := .Values.images.defaults }}
           {{- with .Values.images.scout }}
@@ -430,6 +447,7 @@ spec:
             - /downloader
           args:
             - --cloud-one-endpoint={{ include "container.security.endpoint" . }}
+            - --exclude-kubernetes-service-host-from-proxy={{ default "false" .Values.proxy.excludeKubernetesServiceHost }}
             - --log-level
             - debug
             - --componentdir
@@ -481,40 +499,7 @@ spec:
         - name: api-key
           secret:
             secretName: {{ template "container.security.fullname" . }}-auth
-        {{- if .Values.scout.falco.docker.enabled }}
-        - name: docker-socket
-          hostPath:
-            path: {{ .Values.scout.falco.docker.socket }}
-        {{- end}}{{/* if */}}
-        {{- if .Values.scout.falco.cri.enabled }}
-        - name: cri-socket
-          hostPath:
-            # default is /run/crio/crio.sock on OpenShift.
-            {{- $defaultcripath := "/run/containerd/containerd.sock" }}
-            {{- if .Capabilities.APIVersions.Has "security.openshift.io/v1" }}
-            {{- $defaultcripath = "/run/crio/crio.sock" }}
-            {{- end }}{{/* if */}}
-            path: {{ .Values.scout.falco.cri.socket | default $defaultcripath }}
-        {{- end }}{{/* if */}}
-        {{- if .Values.scout.falco.dockershim.enabled }}
-        - name: dockershim-socket
-          hostPath:
-            # default is /run/dockershim.sock on bottlerocket.
-            {{- $defaultdockershimpath := "/run/dockershim.sock" }}
-            path: {{ .Values.scout.falco.dockershim.socket | default $defaultdockershimpath }}
-        {{- end }}{{/* if */}}
-        {{- if .Values.scout.falco.k0s.enabled }}
-        - name: k0s-socket
-          hostPath:
-            {{- $defaultk0spath := "/run/k0s/containerd.sock" }}
-            path: {{ .Values.scout.falco.k0s.socket | default $defaultk0spath }}
-        {{- end }}{{/* if */}}
-        {{- if .Values.scout.falco.k3s.enabled }}
-        - name: k3s-socket
-          hostPath:
-            {{- $defaultk3spath := "/run/k3s/containerd/containerd.sock" }}
-            path: {{ .Values.scout.falco.k3s.socket | default $defaultk3spath }}
-        {{- end }}{{/* if */}}
+{{- include "containerRuntime.sock.volumes" ( list $ .Values.scout.falco ) | trim | nindent 8 }}
         - name: dev-fs
           hostPath:
             path: /dev
@@ -533,6 +518,16 @@ spec:
         - name: etc-fs
           hostPath:
             path: /etc
+        - name: host-root
+          hostPath:
+            path: /
+            type: Directory
+        - name: status-dir
+          emptyDir:
+            sizeLimit: 1Mi
+        - name: debugfs
+          hostPath:
+            path: /sys/kernel/debug
         - name: config-volume
           configMap:
             name: {{ template "container.security.name" . }}-scout-config
@@ -569,4 +564,4 @@ spec:
 {{- end }}
   updateStrategy:
     type: RollingUpdate
-{{- end }}{{/* if eq true .Values.cloudOne.runtimeSecurity.enabled */}}
+{{- end }}{{/* if or (eq true .Values.cloudOne.runtimeSecurity.enabled) (eq true .Values.cloudOne.malwareScanning.enabled) */}}

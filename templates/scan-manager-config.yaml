@@ -1,4 +1,4 @@
-{{- if eq true .Values.cloudOne.vulnerabilityScanning.enabled }}
+{{- if or (eq true .Values.cloudOne.vulnerabilityScanning.enabled) (eq true .Values.cloudOne.malwareScanning.enabled) }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -7,6 +7,16 @@ metadata:
   labels:
     {{- include "scanManager.labels" . | nindent 4 }}
 data:
+  inheritNodeSelector: {{ .Values.nodeSelector.inheritNodeSelectorScanner | quote }}
+  inheritTolerations: {{ .Values.tolerations.inheritTolerationsScanner | quote }}
+  filterInheritNodeSelector: |
+    {{- if .Values.nodeSelector.filterNodeSelectorScanner }}
+    {{- toYaml .Values.nodeSelector.filterNodeSelectorScanner | nindent 6 }}
+    {{- end }}
+  filterInheritTolerations: |
+    {{- if .Values.tolerations.filterTolerationsScanner }}
+    {{- toYaml .Values.tolerations.filterTolerationsScanner | nindent 6 }}
+    {{- end }}
   scan-job-template.yaml: |
     apiVersion: batch/v1
     kind: Job
@@ -14,6 +24,10 @@ data:
       labels:
         {{- include "scanner.labels" . | nindent 8 }}
         sidecar.istio.io/inject: "false"
+      annotations:
+        {{- with (default .Values.podAnnotations.defaults .Values.podAnnotations.scanner) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       backoffLimit: 2
       activeDeadlineSeconds: {{ .Values.cloudOne.scanManager.activeDeadlineSeconds }}
@@ -24,6 +38,10 @@ data:
             {{- include "scanner.labels" . | nindent 12 }}
             ignoreRuntimeScan: true
             sidecar.istio.io/inject: "false"
+          annotations:
+            {{- with (default .Values.podAnnotations.defaults .Values.podAnnotations.scanner) }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
         spec:
 {{- $securityContextEnabled := .Values.securityContext.enabled }}
 {{- $securityContext := default .Values.securityContext.default .Values.securityContext.scanner }}
@@ -36,13 +54,16 @@ data:
 {{- end }}
 {{- if and .Values.securityContextConstraints.create (.Capabilities.APIVersions.Has "security.openshift.io/v1") }}
           serviceAccountName: {{ include "scanJob.serviceAccountName" . }}
-{{- end}}
+{{- end }}
           restartPolicy: Never
           volumes:
           - name: utility-volume
             emptyDir: {}
           - name: tmp-volume
             emptyDir: {}
+{{- if and .Values.cloudOne.vulnerabilityScanning.enabled .Values.scanner.imageAnnotations.enabled }}
+{{- include "containerRuntime.sock.volumes" ( list $ .Values.scanner.imageAnnotations ) | trim | nindent 10 }}
+{{- end }}
           initContainers:
           - name: vulnerability-scanner-init
             image: IMAGE
@@ -62,12 +83,24 @@ data:
           - name: target
             image: IMAGE
             imagePullPolicy: Always
+            args:
+{{- if and .Values.cloudOne.vulnerabilityScanning.enabled .Values.scanner.imageAnnotations.enabled }}
+{{- include "containerRuntime.sock.args" ( list "cri-path" "/host" .Values.scanner.imageAnnotations ) | trim | nindent 14 }}
+{{- end }}
+            env:
+            {{- if .Values.cloudOne.malwareScanning.enabled }}
+            - name: TM_AM_SCAN_TIMEOUT_SECS
+              value: {{ .Values.cloudOne.malwareScanning.scanTimeoutSeconds }}
+            {{- end }}{{/* if */}}
             volumeMounts:
               - mountPath: /utility
                 name: utility-volume
                 readOnly: true
               - mountPath: /tmp
                 name: tmp-volume
+{{- if and .Values.cloudOne.vulnerabilityScanning.enabled .Values.scanner.imageAnnotations.enabled }}
+{{- include "containerRuntime.sock.volumeMounts" ( list "/host" .Values.scanner.imageAnnotations ) | trim | nindent 14 }}
+{{- end }}
 {{- if $securityContextEnabled }}
             securityContext:
 {{ toYaml $targetSecurityContext | indent 14 }}

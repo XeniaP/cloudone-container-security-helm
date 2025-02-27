@@ -64,6 +64,11 @@ spec:
           - name: compliance-scan-job-template
             mountPath: /etc/config
         args:
+        - --zap-devel={{ default "false" .Values.logConfig.devel }}
+        - --zap-log-level={{ include "logLevel" (list .Values.cloudOne.oversight.logLevel .) }}
+        - --zap-encoder={{ default "json" .Values.logConfig.encoder }}
+        - --zap-stacktrace-level={{ default "error" .Values.logConfig.stacktraceLevel }}
+        - --zap-time-encoding={{ default "rfc3339" .Values.logConfig.timeEncoding }}
         - --tls-min-version={{ include "tlsConfig.minTLSVersion" .Values.tlsConfig }}
         - --tls-cipher-suites={{ include "tlsConfig.cipherSuites" .Values.tlsConfig }}
         - --health-probe-bind-address=:8081
@@ -73,10 +78,10 @@ spec:
         - --mitigation-handler-buffer-size={{ default 50 .Values.cloudOne.oversight.mitigationHandlerBufferSize }}
         - --page-size={{ default 100 .Values.cloudOne.oversight.pageSize }}
         - --sync-period={{ default "3600s" .Values.cloudOne.oversight.syncPeriod }}
-        - --enable-runtime-mitigation={{ default false .Values.cloudOne.runtimeSecurity.enabled }}
-        - --enable-compliance-scan={{ default true .Values.cloudOne.complianceScan.enabled }}
+        - --enable-runtime-mitigation={{ default "false" .Values.cloudOne.runtimeSecurity.enabled }}
+        - --enable-compliance-scan={{ default "false" .Values.cloudOne.complianceScan.enabled }}
         - --job-template-path=/etc/config/compliance-scan-job-template.yaml
-        - --exclude-kubernetes-service-host-from-proxy={{ default true .Values.proxy.excludeKubernetesServiceHost }}
+        - --exclude-kubernetes-service-host-from-proxy={{ default "false" .Values.proxy.excludeKubernetesServiceHost }}
         - --excluded-namespaces
         {{- $excludeNS := (default (list) .Values.cloudOne.exclusion.namespaces) }}
         - {{ $excludeNS | join "," | quote }}
@@ -94,6 +99,7 @@ spec:
         - --telemetry-key-file=/telemetry/key.pem
         {{- end }}{{/* .Values.telemetry.publicKey */}}
         {{- end }}{{/* .Values.telemetry.enabled */}}
+        - --trusted-images={{ include "digest" . }}
         command:
         - /manager
         env:
@@ -236,6 +242,10 @@ data:
     metadata:
       labels:
         {{- include "complianceScanJob.labels" . | nindent 8 }}
+      annotations:
+        {{- with (default .Values.podAnnotations.defaults .Values.podAnnotations.complianceScanJob) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       namespace: {{ .Release.Namespace }}
     spec:
       backoffLimit: 2
@@ -245,6 +255,10 @@ data:
         metadata:
           labels:
             {{- include "complianceScanJob.labels" . | nindent 12 }}
+          annotations:
+            {{- with (default .Values.podAnnotations.defaults .Values.podAnnotations.complianceScanJob) }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
         spec:
           hostPID: true
           serviceAccountName: {{ include "complianceScanJob.serviceAccountName" . }}

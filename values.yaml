@@ -12,6 +12,30 @@ cloudOne:
   ## Default value: https://container.us-1.cloudone.trendmicro.com
   endpoint: https://container.us-1.cloudone.trendmicro.com
 
+  ## Fields for automated cluster registration only
+  ## Cluster name to be used during automated cluster registration. This takes precedence over clusterNamePrefix
+  ## clusterName must be less than 64 characters
+  ##
+  ## Default value: (none)
+  clusterName:
+  ## Cluster name prefix to be used during automated cluster registration
+  ## clusterNamePrefix must be less than 16 characters
+  ##
+  ## Default value: (none)
+  clusterNamePrefix:
+  ## Policy ID to be used when registering the cluster. Takes precedence over policy-as-code
+  ##
+  ## Default value: (none)
+  policyId:
+  ## Group ID used during automated cluster registration. Defaults to the default cluster group
+  ##
+  ## This is requred for automated cluster registration 
+  groupId:
+  ## Cluster registration key to be used with Trend Vision One Container Security
+  ##
+  ## Default value: (none)
+  clusterRegistrationKey: false
+
   exclusion:
     ## List of namespaces for which events will not be generated
     ##
@@ -23,8 +47,7 @@ cloudOne:
   admissionController:
     enabled: true
 
-    ## validationNamespaceSelector is a namespace selector defined so that matching namespaces will
-    ## be subject to validation.
+    ## validationNamespaceSelector is the namespace selector defined for the validating webhook configuration
     ##
     ## For more information about namespace selectors, please see
     ## https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
@@ -34,7 +57,7 @@ cloudOne:
       - key: ignoreAdmissionControl
         operator: DoesNotExist
 
-    ## failurePolicy defines the bahaviour if an unreconized error or timeout occurs. Enabling
+    ## failurePolicy defines the behavior if an unrecognized error or timeout occurs. Enabling
     ## this while not tagging kube-system to be ignored can easily cause the cluster to be
     ## unresponsive.
     ##
@@ -82,6 +105,11 @@ cloudOne:
     ## Default value: 30
     webhookTimeoutSeconds: 30
 
+    ## logLevel sets the log verbosity level. Supported values are debug, info, and error
+    ##
+    ## Default value: info
+    logLevel: info
+
   oversight:
     enabled: true
 
@@ -107,6 +135,17 @@ cloudOne:
     ##
     enableNetworkPolicyCreation: true
 
+    ## logLevel sets the log verbosity level. Supported values are debug, info, and error
+    ##
+    ## Default value: info
+    logLevel: info
+
+  workloadOperator:
+    ## logLevel sets the log verbosity level. Supported values are debug, info, and error
+    ##
+    ## Default value: info
+    logLevel: info
+
   scanManager:
     ## Maximum number of scan jobs running at once.
     ##
@@ -117,9 +156,14 @@ cloudOne:
     maxJobCount: 5
     ## activeDeadlineSeconds is the maximum duration a scan job can run before timing out.
     ##
-    ## Default value: 300
+    ## Default value: 3600
     ##
-    activeDeadlineSeconds: 300
+    activeDeadlineSeconds: 3600
+
+    ## logLevel sets the log verbosity level. Supported values are debug, info, and error
+    ##
+    ## Default value: info
+    logLevel: info
 
   runtimeSecurity:
     enabled: false
@@ -131,6 +175,7 @@ cloudOne:
           url: https://splunkserver/services/collector/raw
           headers:
           - ''
+          hecTokenSecretName: ''
 
   complianceScan:
     enabled: true
@@ -169,7 +214,7 @@ cloudOne:
       ## Default value: 3650
       lifetime: 3650
 
-    ## failurePolicy defines the bahaviour if an unreconized error or timeout occurs. Enabling
+    ## failurePolicy defines the behavior if an unrecognized error or timeout occurs. Enabling
     ## this while not tagging kube-system to be ignored can easily cause the cluster to be
     ## unresponsive.
     ##
@@ -188,14 +233,18 @@ cloudOne:
     grpcAuth:
       ## authentication mode, insecure or tls
       type: tls
+
       ## certificate settings
       certificate:
         ## lifetime is the lifetime in days of the default signed certificate.
         ##
         ## Default value: 3650
         lifetime: 3650
-    ## log verbosity level
-    vLevel: 5
+
+    ## logLevel sets the log verbosity level. Supported values are debug, info, and error
+    ##
+    ## Default value: info 
+    logLevel: info
 
   kubeRbacProxy:
     certificate:
@@ -220,6 +269,50 @@ cloudOne:
       ##
       ## Default value: 3650
       lifetime: 3650
+
+  ## malwareScanning is a section that controls the malware scanning feature.
+  malwareScanning:
+    enabled: false
+    excludedPaths: []
+    scanTimeoutSeconds: 300
+
+    scanner:
+      ## scanner is a section that controls the malware scanner engine.
+      enableScanCache: false
+      scanLog: false
+      port: 50051
+      logLevel: info
+
+      autoscaling:
+        enabled: false
+        minReplicas: 1
+        maxReplicas: 2
+        targetCPUUtilization: 800
+      readinessProbe:
+        tcpSocket:
+          port: 50051
+        initialDelaySeconds: 300
+
+  policyOperator:
+    ## enable the cluster-managed policy feature
+    enabled: false
+
+    ## Minimum value: 5m
+    ## Maximum value: 1h
+    reconciliationPeriod: 5m
+
+    ## clusterPolicyName is the name of the policy that will be reconciled by the policy operator
+    ## Only one policy can be reconciled by the policy operator and applied to the cluster
+    ## Use the name defined here as the name of the cluster policy custom resource
+    ## The policy name will also be used as vision one policy name
+    ##
+    ## Default value: trendmicro-cluster-policy
+    clusterPolicyName: trendmicro-cluster-policy
+
+    ## logLevel sets the log verbosity level. Supported values are debug, info, and error
+    ##
+    ## Default value: info
+    logLevel: info
 
 securityContextConstraints:
   # enable the Security Context Constraints creation in Openshift
@@ -340,6 +433,21 @@ serviceAccount:
 
     ## Annotations to add to the service account
     annotations: {}
+  policyOperator:
+    ## The name of the service account to use.
+    ## If not set and create is true, a name is generated using the fullname of policyOperator template
+    name: ''
+
+    ## Annotations to add to the service account
+    annotations: {}
+
+  malwareScanner:
+    ## The name of the service account to use.
+    ## If not set and create is true, a name is generated using the fullname of malwareScanner template
+    name: ''
+
+    ## Annotations to add to the service account
+    annotations: {}
 
 rbac:
   # Create and use rbac resources
@@ -352,6 +460,9 @@ networkPolicy:
   enabled: true
   ## k8s-metacollector network policy, default false
   k8sMetaCollector:
+    enabled: false
+  ## malwareScanner network policy, default false
+  malwareScanner:
     enabled: false
 
 telemetry:
@@ -414,8 +525,7 @@ securityContext:
       capabilities:
         drop:
         - ALL
-        add:
-        - DAC_READ_SEARCH
+        add: []
       privileged: false
       readOnlyRootFilesystem: true
       runAsNonRoot: false
@@ -433,28 +543,34 @@ securityContext:
     pod:
       runAsNonRoot: true
     scout:
-      allowPrivilegeEscalation: false
+      allowPrivilegeEscalation: true
       capabilities:
         drop:
         - ALL
         add:
         - SYS_PTRACE
+        - SYS_ADMIN
+        - DAC_READ_SEARCH
       privileged: false
       readOnlyRootFilesystem: true
       runAsNonRoot: false
       runAsUser: 0
     downloader:
-      allowPrivilegeEscalation: false
-      capabilities:
-        drop:
-        - ALL
-      privileged: false
+      privileged: true
       readOnlyRootFilesystem: true
       runAsNonRoot: false
       runAsUser: 0
     falco:
       privileged: true
       readOnlyRootFilesystem: true
+      runAsNonRoot: false
+      runAsUser: 0
+
+  malwareScanner:
+    pod:
+      runAsNonRoot: false
+    scanner:
+      privileged: false
       runAsNonRoot: false
       runAsUser: 0
 
@@ -475,6 +591,13 @@ proxy:
   ## Default value: (none)
   httpsProxy:
 
+  ## noProxy is a comma-separated list of hosts or CIDR blocks that should not be proxied.
+  ##
+  ## The value may be a comma-separated list of hosts or CIDR blocks. Ex: "localhost,127.0.0.0/8"
+  ##
+  ## Default value: (none)
+  noProxy:
+
   ## username, if set, is the user name to provide to the outbound proxy when making requests.
   ##
   ## Default value: (none)
@@ -489,6 +612,36 @@ proxy:
   ##
   ## Default value: true
   excludeKubernetesServiceHost: true
+
+
+logConfig:
+  ## devel sets the log mode defaults to development mode if set to true
+  ## Development mode defaults encoder=consoleEncoder,logLevel=Debug,stackTraceLevel=Warn) 
+  ## Production Mode defaults(encoder=jsonEncoder,logLevel=Info,stackTraceLevel=Error)
+  devel: false
+
+  ## logLevel sets the log verbosity level. Supported values are debug, info, and error
+  ## Overrides the logLevel set for each component
+  ##
+  ## Default value: 
+  logLevel:
+
+  ## encoder sets the log encoder. Supported values are json and console
+  ##
+  ## Default value: json
+  encoder: json
+
+  ## stackTraceLevel sets the level above which stacktraces are captured 
+  ## Supported values are info, error or panic
+  ##
+  ## Default value: error
+  stacktraceLevel: error
+
+  ## timeEncoding sets the time encoding format 
+  ## Supported values are epoch, millis, nano, iso8601, rfc3339 or rfc3339nano
+  ##
+  ## Default value: rfc3339
+  timeEncoding: rfc3339
 
 tlsConfig:
   ## minTLSVersion is the minimum TLS version that the server will accept.
@@ -588,20 +741,68 @@ resources:
     limits:
       cpu: 1000m
       memory: 1024Mi
+  policyOperator:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+  malwareScanner:
+    requests:
+      cpu: 100m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
 
 nodeSelector:
   ## nodeSelector if set, ensures pods are only assigned to a particular set of nodes.
   ## Defaults apply to all pods created by this chart unless overridden by a non default configuration.
+  ## Does not apply to scanner pods. Use inheritNodeSelectorScanner instead.
   ##
+  ## Type: map[string]string
   ## Default Value: {}
   defaults: {}
+
+  ## inheritNodeSelectorScanner if set, will inherit the nodeSelectors from the owner resource of the pod 
+  ##  whose images are being scanned to the respective scanner pods.
+  ## By default nodeSelectors are not inherited.
+  ##
+  ## Default Value: false
+  inheritNodeSelectorScanner: false
+
+  ## filterNodeSelectorScanner if set, will only inherit the specified nodeSelectors from the owner resource of the pod
+  ##  whose images are being scanned to the respective scanner pods.
+  ## By default all nodeSelectors are inherited if inheritNodeSelectorScanner is set to true and filterNodeSelectorScanner is not set.
+  ##
+  ## Type: map[string]string
+  ## Default Value: []
+  filterNodeSelectorScanner: {}
 
 tolerations:
   ## tolerations if set, allows (but does not require) the pods to schedule onto nodes with matching taints.
   ## Defaults apply to all pods created by this chart unless overridden by a non default configuration.
+  ## Does not apply to scanner pods. Use inheritTolerationsScanner instead.
   ##
+  ## Type: list of map[string]string
   ## Default Value: {}
   defaults: []
+
+  ## inheritTolerationsScanner if set, will inherit the tolerations from the owner resource of the pod
+  ##  whose images are being scanned to the respective scanner pods.
+  ## By default tolerations are not inherited.
+  ##
+  ## Default Value: false
+  inheritTolerationsScanner: false
+
+  ## filterTolerationsScanner if set, will only inherit the specified tolerations from the owner resource of the pod
+  ##  whose images are being scanned to the respective scanner pods.
+  ## By default all tolerations are inherited if inheritTolerationsScanner is set to true and filterTolerationsScanner is not set.
+  ##
+  ## Type: list of map[string]string
+  ## Default Value: []
+  filterTolerationsScanner: []
 
 affinity:
   ## affinity if set, provides the ability constrain which nodes your pod is eligible to be scheduled on, based on labels.
@@ -661,6 +862,7 @@ scout:
       ## Determines if the docker socket is mounted in the falco container.
       ## Required for docker based runtimes
       enabled: true
+
       ## socket, determines which socket to mount for enabling docker based runtimes.
       socket: /var/run/docker.sock
 
@@ -668,30 +870,59 @@ scout:
       ## Determines if the cri (containerd or crio) socket is mounted in the falco container.
       ## Required for cri based runtimes
       enabled: true
+
       ## socket, determines which socket to mount for enabling cri based runtimes.
       ## Default value: (determined by platform)
       socket:
+
     dockershim:
       ## Determines if the dockershim socket is mounted in the falco container.
       ## Required for bottlerocket
       enabled: true
+
       ## socket, determines which socket to mount for enabling dockershim based runtimes.
       ## Default value: (determined by platform)
       socket:
+
     k0s:
       ## Determines if the k0s socket is mounted in the falco container.
       enabled: true
+
       ## socket, determines which socket to mount for enabling k0s based runtimes.
       socket:
+
     k3s:
       ## Determines if the k3s socket is mounted in the falco container.
       enabled: true
+
       ## socket, determines which socket to mount for enabling k3s based runtimes.
       socket:
+
     ## modernBpf, determine if falco uses ebpf CO-RE if kernel supports.
     ## If it is false or kernel doesn't support ebpf CO-RE, the ebpf driver will be downloaded from Trend Micro Cloud One Container Security service.
     ## Default value: true
     modernBpf: true
+
+    ## stdout_enabled sets the status of stdout log output
+    ##
+    ## Default Value: false
+    stdout_enabled: false
+
+    ## syslog_enabled sets the status of syslog output
+    ##
+    ## Default Value: false
+    syslog_enabled: false
+
+    ## least_privileged, determines if falco is running in least privileged mode
+    ##
+    ## Default Value: false
+    least_privileged: false
+
+    ## logLevel sets the log verbosity level for Falco's operational logs. Supported values are "emergency", "alert", "critical",
+    ## "error", "warning", "notice", "info", "debug".
+    ##
+    ## Default value: info
+    logLevel: info
 
   scout:
     ## falcoInternalEvent, determines how to deal with falco internal event
@@ -703,23 +934,59 @@ scout:
     ##
     ## Default Value: []
     extraArgs: []
+
     ## env, if set will apply additional environment variables to the scout container
     ##
     ## Default Value: []
     env: {}
+
+    ## logLevel sets the log verbosity level. Supported values are debug, info, and error
+    ##
+    ## Default value: info
+    logLevel: info
+
   downloader:
     ## extraArgs, if set will apply additional arguments to scout container
     ##
     ## Default Value: []
     extraArgs: []
+
     ## env, if set will apply additional environment variables to the scout container
     ##
     ## Default Value: []
     env: {}
+
     ## componentType, the type of component to download
     componentType: falco-ebpf-program
+
     ## componentDir, the directory where the component to be downloaded
     componentDir: /var/component
+
+malwareScanner:
+  defaultExcludedPaths:
+  - /proc
+  - /dev
+  - /sys
+  scanWorkerCount: 5
+
+scanner:
+  imageAnnotations:
+    ## enabled is a global flag controlling whether image annotations are retrieved from the image manifest, the image annotation will be displayed in vulnerability events
+    ## Default value: false
+    enabled: false
+    docker:
+      ## Determines if the docker socket is mounted in the scan-job pod.
+      ## Required for docker based runtimes
+      enabled: true
+      ## socket, determines which socket to mount for enabling docker based runtimes.
+      socket: /var/run/docker.sock
+    cri:
+      ## Determines if the cri (containerd or crio) socket is mounted in the scan-job container.
+      ## Required for cri based runtimes
+      enabled: true
+      ## socket, determines which socket to mount for enabling cri based runtimes.
+      ## Default value: (determined by platform)
+      socket:
 
 images:
   defaults:
@@ -746,7 +1013,7 @@ images:
 
     ## Default tag for images to pull. This can be overridden for each image
     ## by specifying the tag attribute at the image level.
-    tag: 2.3.47
+    tag: 2.6.1
 
     ## Default pull policy for images. This can be overridden for each image
     ## by specifying the pullPolicy attribute at the image level.
@@ -761,55 +1028,63 @@ images:
     # imagePullSecret:
   admissionController:
     repository: admission-controller
-    digest: sha256:8fe57301af457e723c4a473cd6ef4aad84e5b471a3726199abf1103e4cda2b26
+    digest: sha256:9a57b7f1692501485cb5d828cb3d1c263c692b9bf5ef66834d1456ea700c8ed7
 
   oversight:
     repository: oversight-controller
-    digest: sha256:5f0124a347a72ae5f5d31badb656c626f0df81cf19f890c4a3d984f2a56386e6
+    digest: sha256:73bffafc8f4dccb8ff521dd6f18f5014404509c1f0d476664aef3b6090c0206f
 
   usage:
     repository: usage-controller
-    digest: sha256:6f38decf3adaa76394ef07b4b52c0e6e3566807c3f43428bb7938202d660fbdb
+    digest: sha256:fd9039984ca59857a4cbb5f57e726821bcc48fa83f30314f0634103f7222d849
 
   rbacProxy:
     repository: rbac-proxy
-    digest: sha256:a5f4b8a0fba4cdbc3ede1ebc16b71bf4a1d78bcfb0831afd3526c7fb0b7f1013
+    digest: sha256:cf702fe130af0be68b29e5abc269e0556493d0eaadd2b59d3ef0266b56d2429d
 
   falco:
     repository: falco
-    digest: sha256:7dd9913263de23484df1fce91a1cedf8d59a9ea49704714fb408664f8ebed2c0
+    digest: sha256:6365813919f4d99e0b50c7a64fcb4e80a7cef64f5789c5fabbc2268c912b6e76
 
   scout:
     repository: scout
-    digest: sha256:837942d2043da1fb667994d9900376be99d9fe0acbee43f007a1974e13781e3f
+    digest: sha256:5656553719fb327c85b8d2390f1a5d7f70287b51f6b9fc69d7ae44cd3f7b6c82
 
   scanManager:
     repository: scan-manager
-    digest: sha256:48b18747cd6157dabaeeac6fe932a0c3d8367e15cd8c9ecd9f66780d4b4bb34e
+    digest: sha256:fa63a91dd775fd18be76f82ef3f755d95a6d959566fa0ac956afdb10701370b2
 
   scanJob:
     repository: scan-job
-    digest: sha256:b0623b73fa6c4cc74e4f69fd0da2ae09a879b72f8cb734b2bda7afaba2ee0845
+    digest: sha256:d43205c92b0661a4b252009a8e7030029c89d30c30e0c2f694ae3474bc246a2c
 
   complianceScanJob:
     repository: compliance-scan-job
-    digest: sha256:f8895bd72786f59c7f8a9d181a20b3f21b5b1f7e94986ead9c733e59e277f109
+    digest: sha256:3bb9c332c2ba2a17c9454524ed6e6f50d033298ad2c9e83e9cca79a1f3d4d7c8
 
   workloadOperator:
     repository: workload-operator
-    digest: sha256:7caa15319cef085787a7b9a4a4ab37d2bac034f7b8807970561a8c380d51e8cb
+    digest: sha256:30062696e0dde0849e55bab5f0844d017607db2cc8544c55825875a1eeebb864
 
   fargateInjector:
     repository: fargate-tool
-    digest: sha256:a3cd65de92df5c551bdb32e5b37cbe80cd7d11197bf2e25e886acc0325a5f3f4
+    digest: sha256:b13241efce12a977a78d951c484d7fc57fa4fff3e668d78ea290ca413e72249a
 
   pdig:
     repository: pdig
-    digest: sha256:1aa586f804a87e3a32dca9e2d3ae8a732e0b2238dd31c4bbeb434744f9472b6c
+    digest: sha256:b23781008ea0357b724a81b37d3c091cb679bef8dc4408d9f9ac998dde878fba
 
   k8sMetaCollector:
     repository: k8s-metacollector
-    digest: sha256:00c497c1b3d1483da53c32b58bae548af183a1c9f37c20298df1a79c10757e70
+    digest: sha256:19d498fc0cad36f2e34cb0cc82d26591a3c17e9c014b36413705c67d8f299998
+
+  policyOperator:
+    repository: policy-operator
+    digest: sha256:68d015a0aef0d5f1244389e38926d1438fda55d47d800d333c125b1be4f8efbc
+
+  malwareScanner:
+    repository: malware-scanner
+    digest: sha256:7d4789b4cffc9208784c53b81ed2731eca9aa788848efe5ce1dda19667dd0b4e
 
 ##
 ## Determine whether to use existing secrets in the target namespace rather than

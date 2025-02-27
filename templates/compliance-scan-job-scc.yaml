@@ -4,39 +4,37 @@ kind: SecurityContextConstraints
 metadata:
   annotations:
     kubernetes.io/description: |
-      This SCC provides least-privilege requirement to run the scan job in Openshift.
-  name: {{ template "container.security.name" . }}-scanner
+      This SCC provides mosted privilege requirement to run the compliance scan job in Openshift.
+  name: {{ template "container.security.name" . }}-compliance-scanner
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "container.security.labels" . | nindent 4 }}
 allowHostDirVolumePlugin: true
-allowHostIPC: false
-allowHostNetwork: false
-allowHostPID: false
-allowHostPorts: false
-allowPrivilegeEscalation: {{ .Values.scanner.imageAnnotations.enabled }}
-allowPrivilegedContainer: {{ .Values.scanner.imageAnnotations.enabled }}
+allowHostIPC: true
+allowHostNetwork: true
+allowHostPID: true
+allowHostPorts: true
+allowPrivilegeEscalation: true
+allowPrivilegedContainer: true
 allowedCapabilities:
 {{- toYaml .Values.securityContext.scanner.target.capabilities.add | nindent 2}}
 allowedUnsafeSysctls: []
 defaultAddCapabilities: []
 fsGroup:
-  type: MustRunAs
+  type: RunAsAny
 groups: []
-priority: 0
+priority: 10
 readOnlyRootFilesystem: true
 requiredDropCapabilities: []
 runAsUser:
   type: RunAsAny
 seLinuxContext:
-  type: MustRunAs
+  type: RunAsAny
 supplementalGroups:
   type: RunAsAny
-users: []
+users: 
+- system:serviceaccount:{{ .Release.Namespace }}:{{ include "complianceScanJob.serviceAccountName" . }}
+
 volumes:
-- hostPath
-- configMap
-- downwardAPI
-- emptyDir
-- secret
+- '*'
 {{- end }}
